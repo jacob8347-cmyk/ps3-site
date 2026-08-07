@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PS3 Homebrew / Temas</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>PS3 Homebrew & Temas</h1>
+    <nav>
+      <a href="index.html">Inicio</a> |
+      <a href="admin.html">Administración</a>
+    </nav>
+    <p class="hint">Diseñado para navegadores de consolas: carga rápida y enlaces directos.</p>
+  </header>
+
+  <main>
+    <div id="controls">
+      <input id="search" placeholder="Buscar..." />
+      <select id="category">
+        <option value="">Todas las categorías</option>
+      </select>
+    </div>
+
+    <ul id="list"></ul>
+  </main>
+
+  <footer>
+    <small>Plantilla para contenido legal y homebrew. Respeta derechos de autor.</small>
+  </footer>
+
+<script>
+const RAW_BASE = location.origin + location.pathname.replace(/\/[^/]*$/, '/'); // assumes manifest in same dir
+async function loadManifest() {
+  try {
+    const r = await fetch('manifest.json', {cache: 'no-store'});
+    if (!r.ok) throw new Error('No manifest');
+    return await r.json();
+  } catch (e) { return {items: []}; }
+}
+
+function render(items) {
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.innerHTML = `<h3>${escapeHtml(it.title)} <small>(${escapeHtml(it.category)})</small></h3>
+      <p>${escapeHtml(it.description || '')}</p>
+      <div class="meta">Autor: ${escapeHtml(it.author||'—')} · Tamaño: ${escapeHtml(it.size||'—')}</div>
+      <a class="download" href="${it.download_url}" target="_blank" rel="noopener">Descargar</a>`;
+    list.appendChild(li);
+  }
+}
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+
+function populateCategories(items){
+  const sel = document.getElementById('category');
+  const cats = new Set(items.map(i=>i.category||'Sin categoría'));
+  for (const c of cats) {
+    const opt = document.createElement('option'); opt.value = c; opt.textContent = c;
+    sel.appendChild(opt);
+  }
+}
+
+async function init(){
+  const manifest = await loadManifest();
+  const items = manifest.items || [];
+  populateCategories(items);
+  render(items);
+
+  document.getElementById('search').addEventListener('input', (e)=>{
+    const q = e.target.value.toLowerCase();
+    const cat = document.getElementById('category').value;
+    const filt = items.filter(it=>{
+      return (cat === '' || (it.category||'')===cat) &&
+        (it.title+ ' ' + (it.description||'') + ' ' + (it.author||'')).toLowerCase().includes(q);
+    });
+    render(filt);
+  });
+
+  document.getElementById('category').addEventListener('change', ()=> document.getElementById('search').dispatchEvent(new Event('input')));
+}
+
+init();
+</script>
+</body>
+</html>

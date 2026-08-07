@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": "theme-sample",
+      "title": "Tema PS3 - Azul Minimal",
+      "category": "Temas",
+      "description": "Tema minimalista azul para XMB",
+      "author": "TuNombre",
+      "size": "2.3 MB",
+      "download_url": "files/theme-azul.zip",
+      "path": "files/theme-azul.zip"
+    },
+    {
+      "id": "homebrew-sample",
+      "title": "Homebrew - MediaTool",
+      "category": "Homebrew",
+      "description": "Herramienta para gestionar medios",
+      "author": "DevX",
+      "size": "1.1 MB",
+      "download_url": "files/mediatool.pkg",
+      "path": "files/mediatool.pkg"
+    }
+  ]
+}

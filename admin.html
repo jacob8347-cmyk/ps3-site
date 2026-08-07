@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin - PS3 Site</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>.admin-form{max-width:760px;margin:0 auto}.field{margin:.6rem 0}</style>
+</head>
+<body>
+  <header><h1>Administración</h1><nav><a href="index.html">Volver</a></nav></header>
+  <main class="admin-form">
+    <p class="hint">Para subir/editar/quitar archivos en el repositorio desde esta página necesitas un Personal Access Token (PAT) de GitHub con permisos repo (o public_repo para repos públicos).</p>
+
+    <div class="field">
+      <label>GitHub repo (owner/repo): <input id="repo" placeholder="ej: jacob8347-cmyk/ps3-site"></label>
+    </div>
+    <div class="field">
+      <label>Token (colócalo aquí — NO lo compartas): <input id="token" type="password" style="width:100%"></label>
+    </div>
+
+    <hr>
+
+    <h3>Subir nuevo archivo + crear entrada</h3>
+    <div class="field"><label>Título: <input id="title"></label></div>
+    <div class="field"><label>Categoría: <input id="category"></label></div>
+    <div class="field"><label>Autor: <input id="author"></label></div>
+    <div class="field"><label>Descripción: <input id="desc"></label></div>
+    <div class="field"><label>Archivo: <input id="file" type="file"></label></div>
+    <div class="field"><button id="upload">Subir y crear</button></div>
+
+    <hr>
+    <h3>Lista actual de items (manifest.json)</h3>
+    <div id="manifest-area"></div>
+  </main>
+
+<script>
+const GH_API = 'https://api.github.com';
+let cachedManifest = null;
+document.getElementById('upload').addEventListener('click', onUpload);
+
+function getHeaders(token){ return { Authorization: 'token ' + token, Accept: 'application/vnd.github+json' }; }
+
+async function onUpload(){
+  const repo = document.getElementById('repo').value.trim();
+  const token = document.getElementById('token').value.trim();
+  if(!repo || !token){ alert('Repo y token requeridos'); return; }
+  const fileInput = document.getElementById('file');
+  if(!fileInput.files.length){ alert('Selecciona un archivo'); return; }
+  const file = fileInput.files[0];
+  const path = 'files/' + file.name;
+  const content = await fileToBase64(file);
+
+  // 1) Subir archivo al repo (crear/actualizar)
+  const putUrl = `${GH_API}/repos/${repo}/contents/${encodeURIComponent(path)}`;
+  const payload = { message: `upload: ${file.name}`, content: content.split(',')[1] };
+  const r = await fetch(putUrl, { method: 'PUT', headers: getHeaders(token), body: JSON.stringify(payload) });
+  const j = await r.json();
+  if(!r.ok){ console.error(j); alert('Error subiendo archivo: ' + (j.message || r.status)); return; }
+  const download_url = `https://raw.githubusercontent.com/${repo}/HEAD/${path}`;
+
+  // 2) Actualizar manifest.json
+  const manifestPath = 'manifest.json';
+  const manifest = await fetchManifest(repo, token);
+  const id = slugify(document.getElementById('title').value || file.name);
+  const item = {
+    id,
+    title: document.getElementById('title').value || file.name,
+    category: document.getElementById('category').value || 'Sin categoría',
+    description: document.getElementById('desc').value || '',
+    author: document.getElementById('author').value || '',
+    size: (file.size/1024/1024).toFixed(2) + ' MB',
+    download_url,
+    path
+  };
+  manifest.items = manifest.items || [];
+  manifest.items.unshift(item);
+
+  await putFile(repo, manifestPath, JSON.stringify(manifest, null, 2), `manifest: add ${id}`, token, manifest._sha);
+  alert('Subido y manifest actualizado');
+  loadManifestArea(repo, token);
+}
+
+function fileToBase64(file){
+  return new Promise((res,rej)=>{
+    const r = new FileReader();
+    r.onload = ()=> res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function slugify(s){ return s.toString().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-_]/g,'').slice(0,60); }
+
+async function fetchManifest(repo, token){
+  const url = `${GH_API}/repos/${repo}/contents/manifest.json`;
+  const r = await fetch(url, { headers: getHeaders(token) });
+  if (r.status === 404) return { items: [] };
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.message || 'manifest fetch error');
+  const text = atob(j.content);
+  const parsed = JSON.parse(text);
+  parsed._sha = j.sha;
+  return parsed;
+}
+
+async function putFile(repo, path, contentStr, message, token, existingSha){
+  const url = `${GH_API}/repos/${repo}/contents/${encodeURIComponent(path)}`;
+  const body = { message, content: btoa(unescape(encodeURIComponent(contentStr))) };
+  if(existingSha) body.sha = existingSha;
+  const r = await fetch(url, { method: 'PUT', headers: getHeaders(token), body: JSON.stringify(body) });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.message || 'put error');
+  return j;
+}
+
+async function loadManifestArea(repo, token){
+  try{
+    const manifest = await fetchManifest(repo, token);
+    cachedManifest = manifest;
+    const area = document.getElementById('manifest-area');
+    area.innerHTML = '';
+    const list = document.createElement('ul');
+    (manifest.items||[]).forEach(it=>{
+      const li = document.createElement('li');
+      li.innerHTML = `<strong>${it.title}</strong> (${it.category}) — ${it.size || ''} \
+        <button data-id="${it.id}" class="del">Eliminar</button>\n        <button data-id="${it.id}" class="edit">Editar</button>`;
+      list.appendChild(li);
+    });
+    area.appendChild(list);
+    area.querySelectorAll('.del').forEach(b=>b.addEventListener('click', onDelete));
+    area.querySelectorAll('.edit').forEach(b=>b.addEventListener('click', onEdit));
+  }catch(e){ alert('No se pudo leer manifest: ' + e.message); }
+}
+
+async function onDelete(e){
+  const id = e.target.dataset.id;
+  if(!confirm('Eliminar el item ' + id + '? (no elimina el archivo subido automáticamente)')) return;
+  const repo = document.getElementById('repo').value.trim();
+  const token = document.getElementById('token').value.trim();
+  const manifest = cachedManifest;
+  manifest.items = (manifest.items||[]).filter(it=>it.id !== id);
+  await putFile(repo, 'manifest.json', JSON.stringify(manifest, null, 2), `manifest: remove ${id}`, token, manifest._sha);
+  alert('Item eliminado del manifest');
+  loadManifestArea(repo, token);
+}
+
+async function onEdit(e){
+  const id = e.target.dataset.id;
+  const item = (cachedManifest.items||[]).find(it=>it.id===id);
+  if(!item) return alert('Item no encontrado');
+  const repo = document.getElementById('repo').value.trim();
+  const token = document.getElementById('token').value.trim();
+  const newTitle = prompt('Título', item.title) || item.title;
+  const newDesc = prompt('Descripción', item.description||'') || item.description;
+  item.title = newTitle; item.description = newDesc;
+  await putFile(repo, 'manifest.json', JSON.stringify(cachedManifest, null, 2), `manifest: edit ${id}`, token, cachedManifest._sha);
+  alert('Editado');
+  loadManifestArea(repo, token);
+}
+
+// helper: when repo/token change, load manifest
+document.getElementById('repo').addEventListener('change', ()=> loadManifestArea(document.getElementById('repo').value.trim(), document.getElementById('token').value.trim()));
+document.getElementById('token').addEventListener('change', ()=> loadManifestArea(document.getElementById('repo').value.trim(), document.getElementById('token').value.trim()));
+</script>
+</body>
+</html>
